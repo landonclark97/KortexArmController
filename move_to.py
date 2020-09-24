@@ -24,7 +24,7 @@ robot_urdf = URDF.from_parameter_server()
 kdl_kin = KDLKinematics(robot_urdf, "base_link", "end_effector_link")
 
 
-MOVEMENT_RES = 0.001
+MOVEMENT_RES = 0.01
 
 
 ########################################
@@ -85,16 +85,17 @@ def steps_to_goal(pos1, pos2):
     return math.ceil(abs(norm_pos1-norm_pos2)/MOVEMENT_RES)
 
 
+def percent_change(x, y, percent):
+    diff = x-y
+    return x-(diff*percent)
 
 
 def interpolate_position(pos1, pos2, steps, t):
-    diff_x = pos2[0] - pos1[0]
-    diff_y = pos2[1] - pos1[1]
-    diff_z = pos2[2] - pos1[2]
+    curr_percent = (t/steps)
 
-    new_x = (diff_x*t)/steps
-    new_y = (diff_y*t)/steps
-    new_z = (diff_z*t)/steps
+    new_x = percent_change(pos1[0], pos2[0], curr_percent)
+    new_y = percent_change(pos1[1], pos2[1], curr_percent)
+    new_z = percent_change(pos1[2], pos2[2], curr_percent)
 
     return [new_x, new_y, new_z]
 
@@ -176,11 +177,11 @@ in_q = quaternion_about_axis(in_theta, (in_nx, in_ny, in_nz))
 
 
 while True:
-    final_px = input("target x")
+    final_px = input("target x\n")
     final_px = float(final_px)
-    final_py = input("target y")
+    final_py = input("target y\n")
     final_py = float(final_py)
-    final_pz = input("target z")
+    final_pz = input("target z\n")
     final_pz = float(final_pz)
 
     final_pxyz_norm = math.sqrt((final_px*final_px) + (final_py*final_py)+(final_pz*final_pz))
@@ -198,7 +199,7 @@ final_ny = float(final_ny)
 final_nz = input("target axis n_z\n")
 final_nz = float(final_nz)
 
-final_nxyz_norm = math.sqrt((final_nx*in_nx)+(final_ny*in_ny)+(final_nz*in_nz))
+final_nxyz_norm = math.sqrt((final_nx*final_nx)+(final_ny*final_ny)+(final_nz*final_nz))
 
 final_nx = final_nx/final_nxyz_norm
 final_ny = final_ny/final_nxyz_norm
@@ -216,23 +217,27 @@ final_q = quaternion_about_axis(final_theta, (final_nx, final_ny, final_nz))
 
 
 start_pose = group.get_current_pose().pose
-start_quat = [intial_pose.orientation.w, intial_pose.orientation.x, intial_pose.orientation.y, initial_pose.orientation.z]
-start_pos = [initial_pose.position.x, initial_pose.position.y, initial_pose.position.z]
+start_quat = [start_pose.orientation.w, start_pose.orientation.x, start_pose.orientation.y, start_pose.orientation.z]
+start_pos = [start_pose.position.x, start_pose.position.y, start_pose.position.z]
 
 in_pos = [in_px, in_py, in_pz]
 final_pos = [final_px, final_py, final_pz]
 
 steps = steps_to_goal(start_pos, in_pos)
+steps = int(steps)
 
+print "steps: ", steps
 
 pose_goal = Pose()
-waypoints = []
 
-for i in range(0, steps+1):
+waypoints = []
+waypoints.append(copy.deepcopy(start_pose))
+
+for i in range(1, steps+1):
 
 
     temp_quat = slerp(start_quat, in_q, i/steps)
-    temp_pos = interpolate_position(start_pos, [in_px, in_py, in_pz])
+    temp_pos = interpolate_position(start_pos, in_pos, steps, i)
 
 
     pose_goal.position.x = temp_pos[0]
@@ -251,7 +256,7 @@ for i in range(0, steps+1):
 
 (plan, fraction) = group.compute_cartesian_path(
                                 waypoints,   # waypoints to follow
-                                0.01,        # eef_step
+                                0.0001,        # eef_step
                                 0.0)         # jump_threshold
 
 
@@ -268,16 +273,29 @@ group.execute(plan, wait=True)
 
 
 steps = steps_to_goal(in_pos, final_pos)
-
+steps = int(steps)
 
 pose_goal = Pose()
-waypoints = []
 
-for i in range(0, steps+1):
+
+pose_goal.position.x = in_pos[0]
+pose_goal.position.y = in_pos[1]
+pose_goal.position.z = in_pos[2]
+
+pose_goal.orientation.w = in_q[0]
+pose_goal.orientation.x = in_q[1]
+pose_goal.orientation.y = in_q[2]
+pose_goal.orientation.z = in_q[3]
+
+
+waypoints = []
+waypoints.append(copy.deepcopy(pose_goal))
+
+for i in range(1, steps+1):
 
 
     temp_quat = slerp(in_q, final_q, i/steps)
-    temp_pos = interpolate_position(in_pos, final_pos)
+    temp_pos = interpolate_position(in_pos, final_pos, steps, i)
 
 
     pose_goal.position.x = temp_pos[0]
@@ -296,7 +314,7 @@ for i in range(0, steps+1):
 
 (plan, fraction) = group.compute_cartesian_path(
                                 waypoints,   # waypoints to follow
-                                0.01,        # eef_step
+                                0.0001,        # eef_step
                                 0.0)         # jump_threshold
 
 
