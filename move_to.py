@@ -24,6 +24,81 @@ robot_urdf = URDF.from_parameter_server()
 kdl_kin = KDLKinematics(robot_urdf, "base_link", "end_effector_link")
 
 
+MOVEMENT_RES = 0.001
+
+
+########################################
+## QUATERNION INTERPOLATION FUNC #######
+########################################
+
+# http://www.euclideanspace.com/maths/algebra/realNormedAlgebra/quaternions/slerp/index.htm
+def slerp(qa, qb, t):
+    # quaternion to return
+    qm = quaternion_about_axis(0, (1, 0, 0))
+    # Calculate angle between them.
+    cosHalfTheta = qa[0] * qb[0] + qa[1] * qb[1] + qa[2] * qb[2] + qa[3] * qb[3]
+    if (cosHalfTheta < 0):
+        qb[0] = -qb[0]
+        qb[1] = -qb[1]
+        qb[2] = -qb[2]
+        qb[3] = qb[3]
+    cosHalfTheta = -cosHalfTheta
+    # if qa=qb or qa=-qb then theta = 0 and we can return qa
+    if (abs(cosHalfTheta) >= 1.0):
+        qm[0] = qa[0]
+        qm[1] = qa[1]
+        qm[2] = qa[2]
+        qm[3] = qa[3]
+        return qm
+    # Calculate temporary values.
+    halfTheta = math.acos(cosHalfTheta)
+    sinHalfTheta = math.sqrt(1.0 - cosHalfTheta*cosHalfTheta)
+    # if theta = 180 degrees then result is not fully defined
+    # we could rotate around any axis normal to qa or qb
+    if (abs(sinHalfTheta) < 0.001):
+        qm[0] = (qa[0] * 0.5 + qb[0] * 0.5)
+        qm[1] = (qa[1] * 0.5 + qb[1] * 0.5)
+        qm[2] = (qa[2] * 0.5 + qb[2] * 0.5)
+        qm[3] = (qa[3] * 0.5 + qb[3] * 0.5)
+        return qm
+    ratioA = math.sin((1 - t) * halfTheta) / sinHalfTheta
+    ratioB = math.sin(t * halfTheta) / sinHalfTheta
+    # calculate Quaternion.
+    qm[0] = (qa[0] * ratioA + qb[0] * ratioB)
+    qm[1] = (qa[1] * ratioA + qb[1] * ratioB)
+    qm[2] = (qa[2] * ratioA + qb[2] * ratioB)
+    qm[3] = (qa[3] * ratioA + qb[3] * ratioB)
+    return qm
+
+########################################
+########################################
+########################################
+
+
+
+
+
+def steps_to_goal(pos1, pos2):
+    norm_pos1 = math.sqrt((pos1[0]*pos1[0])+(pos1[1]*pos1[1])+(pos1[2]*pos1[2]))
+    norm_pos2 = math.sqrt((pos2[0]*pos2[0])+(pos2[1]*pos2[1])+(pos2[2]*pos2[2]))
+
+    return math.ceil(abs(norm_pos1-norm_pos2)/MOVEMENT_RES)
+
+
+
+
+def interpolate_position(pos1, pos2, steps, t):
+    diff_x = pos2[0] - pos1[0]
+    diff_y = pos2[1] - pos1[1]
+    diff_z = pos2[2] - pos1[2]
+
+    new_x = (diff_x*t)/steps
+    new_y = (diff_y*t)/steps
+    new_z = (diff_z*t)/steps
+
+    return [new_x, new_y, new_z]
+
+
 
 
 ########################################
@@ -65,93 +140,73 @@ display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path
 ## HANDLE INPUT ########################
 ########################################
 
-in_x = input("input x coordinate of object")
-in_x = float(in_x)
-in_y = input("input y coordinate of object")
-in_y = float(in_y)
-in_z = input("object height")
-in_z = float(in_z)
+while True:
+    in_px = input("input x coordinate of object\n")
+    in_px = float(in_px)
+    in_py = input("input y coordinate of object\n")
+    in_py = float(in_py)
+    in_pz = input("input z coordinate of object\n")
+    in_pz = float(in_pz)
 
-final_x = input("target x")
-final_x = float(final_x)
-final_y = input("target y")
-final_y = float(final_y)
-
-final_z = 0
-while(final_z < in_z):
-    final_z = input("target z")
-    final_z = float(final_z)
+    in_pxyz_norm = math.sqrt((in_px*in_px)+(in_py*in_py)+(in_pz*in_pz))
+    if in_pxyz_norm <= 0.95 and in_pz > 0:
+        break
+    else:
+        print "value out of reach, input new coordinates"
 
 
-########################################
-########################################
-########################################
+in_theta = input("input theta (radians)\n")
+in_theta = float(in_theta)
+in_nx = input("input axis n_x\n")
+in_nx = float(in_nx)
+in_ny = input("input axis n_y\n")
+in_ny = float(in_ny)
+in_nz = input("input axis n_z\n")
+in_nz = float(in_nz)
 
+in_nxyz_norm = math.sqrt((in_nx*in_nx)+(in_ny*in_ny)+(in_nz*in_nz))
 
-q = quaternion_about_axis(math.pi, (0, 1, 0))
+in_nx = in_nx/in_nxyz_norm
+in_ny = in_ny/in_nxyz_norm
+in_nz = in_nz/in_nxyz_norm
 
-initial_pose = Pose()
-
-initial_pose.position.x = in_x
-initial_pose.position.y = in_y
-initial_pose.position.z = in_z
-initial_pose.orientation.w = q[0]
-initial_pose.orientation.x = q[1]
-initial_pose.orientation.y = q[2]
-initial_pose.orientation.z = q[3]
-
-xy_norm = math.sqrt((final_x*final_x) + (final_y*final_y))
-
-normal_x = final_x/xy_norm
-normal_y = final_y/xy_norm
-
-z_rot = math.atan2(normal_y, normal_x)
-
-q1 = quaternion_about_axis(z_rot, (0, 0, 1))
-q2 = quaternion_about_axis((math.pi/2), (0, 1, 0))
-
-q_final = quaternion_multiply(q1, q2)
-
-final_pose = Pose()
-final_pose.position.x = final_x
-final_pose.position.y = final_y
-final_pose.position.z = final_z
-final_pose.orientation.w = q_final[0]
-final_pose.orientation.x = q_final[1]
-final_pose.orientation.y = q_final[2]
-final_pose.orientation.z = q_final[3]
+in_q = quaternion_about_axis(in_theta, (in_nx, in_ny, in_nz))
 
 
 
 
+while True:
+    final_px = input("target x")
+    final_px = float(final_px)
+    final_py = input("target y")
+    final_py = float(final_py)
+    final_pz = input("target z")
+    final_pz = float(final_pz)
+
+    final_pxyz_norm = math.sqrt((final_px*final_px) + (final_py*final_py)+(final_pz*final_pz))
+    if final_pxyz_norm <= 0.95 and final_pz > 0:
+        break
+    else:
+        print "value out of reach, input new coordinates"
+
+final_theta = input("target theta (radians)\n")
+final_theta = float(final_theta)
+final_nx = input("target axis n_x\n")
+final_nx = float(final_nx)
+final_ny = input("target axis n_y\n")
+final_ny = float(final_ny)
+final_nz = input("target axis n_z\n")
+final_nz = float(final_nz)
+
+final_nxyz_norm = math.sqrt((final_nx*in_nx)+(final_ny*in_ny)+(final_nz*in_nz))
+
+final_nx = final_nx/final_nxyz_norm
+final_ny = final_ny/final_nxyz_norm
+final_nz = final_nz/final_nxyz_norm
+
+final_q = quaternion_about_axis(final_theta, (final_nx, final_ny, final_nz))
 
 
-
-
-
-
-########################################
-## PRINT ###############################
-########################################
-
-
-# We can get the name of the reference frame for this robot:
-planning_frame = group.get_planning_frame()
-print "============ Reference frame: %s" % planning_frame
-
-# We can also print the name of the end-effector link for this group:
-eef_link = group.get_end_effector_link()
-print "============ End effector: %s" % eef_link
-
-# We can get a list of all the groups in the robot:
-group_names = robot.get_group_names()
-print "============ Robot Groups:", robot.get_group_names()
-
-# Sometimes for debugging it is useful to print the entire state of the
-# robot:
-print "============ Printing robot state"
-print robot.get_current_state()
-print ""
 
 ########################################
 ########################################
@@ -160,27 +215,96 @@ print ""
 
 
 
+start_pose = group.get_current_pose().pose
+start_quat = [intial_pose.orientation.w, intial_pose.orientation.x, intial_pose.orientation.y, initial_pose.orientation.z]
+start_pos = [initial_pose.position.x, initial_pose.position.y, initial_pose.position.z]
+
+in_pos = [in_px, in_py, in_pz]
+final_pos = [final_px, final_py, final_pz]
+
+steps = steps_to_goal(start_pos, in_pos)
+
+
+pose_goal = Pose()
+waypoints = []
+
+for i in range(0, steps+1):
+
+
+    temp_quat = slerp(start_quat, in_q, i/steps)
+    temp_pos = interpolate_position(start_pos, [in_px, in_py, in_pz])
+
+
+    pose_goal.position.x = temp_pos[0]
+    pose_goal.position.y = temp_pos[1]
+    pose_goal.position.z = temp_pos[2]
+
+    pose_goal.orientation.w = temp_quat[0]
+    pose_goal.orientation.x = temp_quat[1]
+    pose_goal.orientation.y = temp_quat[2]
+    pose_goal.orientation.z = temp_quat[3]
+
+
+    waypoints.append(copy.deepcopy(pose_goal))
+
+
+
+(plan, fraction) = group.compute_cartesian_path(
+                                waypoints,   # waypoints to follow
+                                0.01,        # eef_step
+                                0.0)         # jump_threshold
+
+
+display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+display_trajectory.trajectory_start = robot.get_current_state()
+display_trajectory.trajectory.append(plan)
+
+
+display_trajectory_publisher.publish(display_trajectory)
+group.execute(plan, wait=True)
 
 
 
 
 
+steps = steps_to_goal(in_pos, final_pos)
 
 
-group.set_pose_target(initial_pose)
-plan = group.go(wait=True)
-# Calling `stop()` ensures that there is no residual movement
-group.stop()
-# It is always good to clear your targets after planning with poses.
-# Note: there is no equivalent function for clear_joint_value_targets()
-group.clear_pose_targets()
+pose_goal = Pose()
+waypoints = []
 
-time.sleep(2)
+for i in range(0, steps+1):
 
-group.set_pose_target(final_pose)
-plan = group.go(wait=True)
-# Calling `stop()` ensures that there is no residual movement
-group.stop()
-# It is always good to clear your targets after planning with poses.
-# Note: there is no equivalent function for clear_joint_value_targets()
-group.clear_pose_targets()
+
+    temp_quat = slerp(in_q, final_q, i/steps)
+    temp_pos = interpolate_position(in_pos, final_pos)
+
+
+    pose_goal.position.x = temp_pos[0]
+    pose_goal.position.y = temp_pos[1]
+    pose_goal.position.z = temp_pos[2]
+
+    pose_goal.orientation.w = temp_quat[0]
+    pose_goal.orientation.x = temp_quat[1]
+    pose_goal.orientation.y = temp_quat[2]
+    pose_goal.orientation.z = temp_quat[3]
+
+
+    waypoints.append(copy.deepcopy(pose_goal))
+
+
+
+(plan, fraction) = group.compute_cartesian_path(
+                                waypoints,   # waypoints to follow
+                                0.01,        # eef_step
+                                0.0)         # jump_threshold
+
+
+display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+display_trajectory.trajectory_start = robot.get_current_state()
+display_trajectory.trajectory.append(plan)
+
+
+display_trajectory_publisher.publish(display_trajectory)
+group.execute(plan, wait=True)
+
