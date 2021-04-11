@@ -9,5 +9,6 @@ This package exposes some elementary features of the ROS Kortex package - these 
 * `pip install .`
 
 ## Usage
-* `import KortexArm from kortex_arm_controller.kortex_arm \narm = KortexArm()`
+* `import KortexArm from kortex_arm_controller.kortex_arm
+arm = KortexArm()`
 * We can add more here as time goes on
