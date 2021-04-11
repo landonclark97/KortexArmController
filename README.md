@@ -7,3 +7,7 @@ This package exposes some elementary features of the ROS Kortex package - these 
 * `git clone https://github.com/landonclark97/KortexArmController.git`
 * `cd KortexArmController/`
 * `pip install .`
+
+## Usage
+* `import KortexArm from kortex_arm_controller.kortex_arm \narm = KortexArm()`
+* We can add more here as time goes on
